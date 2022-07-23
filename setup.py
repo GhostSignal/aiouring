@@ -17,7 +17,7 @@ URL = 'https://github.com/GhostSignal/aiouring'
 EMAIL = '2685780449@qq.com'
 AUTHOR = 'GhostSignal'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
@@ -72,7 +72,7 @@ class UploadCommand(Command):
     def run(self):
         from shutil import rmtree
         self.status('Removing previous builds…')
-        for i in ('dist', 'build', NAME.lower()+'.egg-info'):
+        for i in ('wheelhouse', 'dist', 'build', NAME.lower()+'.egg-info'):
             try:
                 rmtree(os.path.join(here, i))
             except OSError:
@@ -82,7 +82,15 @@ class UploadCommand(Command):
         os.system(f'{sys.executable} setup.py sdist bdist_wheel --universal')
 
         self.status('Uploading the package to PyPI via Twine…')
-        os.system('twine upload dist/*')
+        os.system('auditwheel repair dist/*.whl')
+        for i in os.listdir('wheelhouse'):
+            j = i.replace('-x86_64.', '-.')
+            os.rename(f'wheelhouse/{i}', f'wheelhouse/{j}')
+        os.system('mv dist/*.tar.gz wheelhouse')
+        if os.path.exists("_twine.sh"):
+            os.system("sh _twine.sh")
+        else:
+            os.system('twine upload wheelhouse/*')
 
         self.status('Pushing git tags…')
         os.system(f'git tag v{VERSION}')
