@@ -75,14 +75,24 @@ cdef class UringProactor:
             return conn.accept()
         return self._register(key, None, finish_accept)
 
-    def recv_into(self, conn: socket.socket, buf: bytearray):
-        cdef long long key = self._ring.do_read(conn.fileno(), buf, len(buf), 0)
+    def recv(self, conn: socket.socket, nbytes: int):
+        buf = bytes(nbytes)
+        cdef long long key = self._ring.do_read(conn.fileno(), buf, nbytes, 0)
 
         def finish_recv(res: int):
             if res < 0:
                 raise OSError(res)
-            return res
+            return buf[:res]
         return self._register(key, buf, finish_recv)
+
+    def recv_into(self, conn: socket.socket, buf: bytearray):
+        cdef long long key = self._ring.do_read(conn.fileno(), buf, len(buf), 0)
+
+        def finish_recv_into(res: int):
+            if res < 0:
+                raise OSError(res)
+            return res
+        return self._register(key, buf, finish_recv_into)
 
     def send(self, conn: socket.socket, buf: bytes):
         cdef long long key = self._ring.do_write(conn.fileno(), buf, len(buf), 0)
@@ -92,6 +102,15 @@ cdef class UringProactor:
                 raise OSError(res)
             return res
         return self._register(key, buf, finish_send)
+
+    def sendfile(self, conn, file, offset, blocksize):
+        raise NotImplementedError
+
+    def sendto(self, conn, buf, flags=0, addr=None):
+        raise NotImplementedError
+
+    def recvfrom(self, conn, nbytes, flags=0):
+        raise NotImplementedError
 
     cdef object _register(self, long long key, object obj, object callback):
         fut = asyncio.Future(loop=self._loop)
@@ -106,13 +125,13 @@ cdef class UringProactor:
 
     cdef void _poll(self, double timeout):
         cdef io_uring_cqe * cqe
-        self._ring.wait_cqe( & cqe, timeout)
-        while ( < long long > cqe):
+        self._ring.wait_cqe(& cqe, timeout)
+        while (< long long > cqe):
             try:
                 fut, _, callback = self._cache.pop(cqe[0].user_data)
             except KeyError:
                 self._ring.cqe_seen(cqe)
-                self._ring.peek_cqe( & cqe)
+                self._ring.peek_cqe(& cqe)
                 continue
 
             if not fut.done():
@@ -124,7 +143,7 @@ cdef class UringProactor:
                     fut.set_result(value)
 
             self._ring.cqe_seen(cqe)
-            self._ring.peek_cqe( & cqe)
+            self._ring.peek_cqe(& cqe)
 
     def select(self, timeout: float = None):
         self._poll(timeout or 0)
